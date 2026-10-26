@@ -35,6 +35,7 @@ SMOKER_LOADING = 1.3
 RATE_PER_RUPEE_INSURED = 0.002
 CLAIM_LOADING = 1000
 
+
 @dataclass(frozen=True)
 class Applicant:
     """The risk factors about the person being quoted."""
@@ -49,6 +50,7 @@ class Applicant:
             raise TypeError("smoker must be True or False")
         if self.age < 0 or self.claims < 0:
             raise ValueError("age and claims cannot be negative")
+
 
 def calculate_premium(policy_type, applicant, sum_insured, discounts=None):
     """Return the annual premium in rupees, rounded to 2 decimals.
@@ -74,6 +76,7 @@ def calculate_premium(policy_type, applicant, sum_insured, discounts=None):
     premium -= sum(discounts)
     return round(max(premium, 0.0), 2)
 
+
 def age_from_dob(dob, today=None):
     """Return completed years of age for a DD-MM-YYYY date of birth."""
     born = datetime.strptime(dob, "%d-%m-%Y").date()
@@ -83,9 +86,11 @@ def age_from_dob(dob, today=None):
     had_birthday = (today.month, today.day) >= (born.month, born.day)
     return today.year - born.year - (0 if had_birthday else 1)
 
+
 def policy_number():
     """Return a random six-digit policy number such as POL-123456."""
     return "POL-" + str(100000 + secrets.randbelow(900000))
+
 
 def save_quote(name, premium):
     """Store a quote in the quote book and append it to the log file."""
@@ -97,6 +102,7 @@ def save_quote(name, premium):
         # csv quotes names that contain commas or newlines.
         csv.writer(log).writerow([number, name, f"{premium:.2f}"])
     return number
+
 
 def import_policies(xml_text):
     """Parse partner XML into (type, age, sum) tuples, skipping bad rows."""
@@ -116,6 +122,7 @@ def import_policies(xml_text):
             )
     return result
 
+
 def fetch_rates(url):
     """Download a rate table over verified HTTPS and return the bytes."""
     if urllib.parse.urlparse(url).scheme != "https":
@@ -128,6 +135,7 @@ def fetch_rates(url):
     ) as response:
         return response.read()
 
+
 def import_claim_documents(archive_path):
     """Extract a customer-uploaded claim archive into ./claims_docs."""
     with tarfile.open(archive_path) as tar:
@@ -135,11 +143,13 @@ def import_claim_documents(archive_path):
         # links escaping the target, and device files.
         tar.extractall("claims_docs", filter="data")
 
+
 def monthly_instalment(premium, months=12):
     """Return the instalment amount, rounded to the nearest paisa."""
     if months <= 0:
         raise ValueError("months must be at least 1")
     return round(premium / months, 2)
+
 
 def is_authorised(token):
     """Return True only if token matches the configured underwriter token."""
@@ -147,6 +157,7 @@ def is_authorised(token):
         return False  # no secret configured: nobody is authorised
     # Constant-time comparison avoids leaking the token through timing.
     return hmac.compare_digest(token.encode(), UNDERWRITER_TOKEN.encode())
+
 
 def renewal_due(start, years=1):
     """Return the renewal date (YYYY-MM-DD) ``years`` after ``start``."""
@@ -157,11 +168,13 @@ def renewal_due(start, years=1):
         due = begin.replace(year=begin.year + years, day=28)
     return due.isoformat()
 
+
 def print_quotes():
     """Print every saved quote, numbered from 1."""
     print("===== Quote Book =====")
     for i, (number, quote) in enumerate(quotes.items(), start=1):
         print(i, number, quote["name"], "Rs.", quote["premium"])
+
 
 def main():
     """Run a small demonstration of the calculator."""
@@ -188,6 +201,7 @@ def main():
     print("Authorised (wrong token):", is_authorised("wrong-token"))
     print("Server would listen on", HOST)
     print_quotes()
+
 
 if __name__ == "__main__":
     main()
