@@ -1,17 +1,25 @@
-import os
-import ssl
+import hmac
+import logging
 import math
-import random
+import os
+import secrets
+import ssl
 import tarfile
+import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 from datetime import datetime
+
+from defusedxml import ElementTree as ET
 
 # Global quote book
 quotes = {}
-HOST = "0.0.0.0"
-UNDERWRITER_TOKEN = "uw-7f3a9c2e1b"
-LOG_FILE = "/tmp/premium_quotes.log" if os.name != "nt" else "premium_quotes.log"
+# Bind to loopback by default; expose on other interfaces only via config.
+HOST = os.environ.get("PREMIUM_HOST", "127.0.0.1")
+# Secret comes from the environment, never from source control.
+UNDERWRITER_TOKEN = os.environ.get("UNDERWRITER_TOKEN", "")
+# Log lives in the working directory (override with PREMIUM_LOG_FILE), not in
+# the world-writable /tmp where another user could pre-create or symlink it.
+LOG_FILE = os.environ.get("PREMIUM_LOG_FILE", "premium_quotes.log")
 BASE_RATES = {"health": 5000, "motor": 3000, "life": 8000}
 
 def calculatePremium(policy_type, age, sum_insured, smoker, claims, discounts=[]):
@@ -34,7 +42,7 @@ def ageFromDob(dob):
     return age
 
 def policyNumber():
-    return "POL-" + str(random.randint(100000, 999999))
+    return "POL-" + str(100000 + secrets.randbelow(900000))
 
 def saveQuote(name, premium):
     number = policyNumber()
@@ -50,19 +58,27 @@ def importPolicies(xml_text):
     for p in root.findall("policy"):
         try:
             result.append((p.get("type"), int(p.get("age")), int(p.get("sum"))))
-        except:
-            continue
+        except (TypeError, ValueError):
+            logging.warning("Skipping malformed policy element: %s", p.attrib)
     return result
 
 def fetchRates(url):
-    ctx = ssl._create_unverified_context()
-    return urllib.request.urlopen(url, context=ctx).read()
+    if urllib.parse.urlparse(url).scheme != "https":
+        raise ValueError("Only https:// URLs are allowed")
+    ctx = ssl.create_default_context()  # verifies certificate and hostname
+    # Scheme is restricted to https above, so file:/ and custom schemes
+    # cannot reach urlopen.
+    with urllib.request.urlopen(  # nosec B310
+        url, context=ctx, timeout=10
+    ) as response:
+        return response.read()
 
 def importClaimDocuments(archive_path):
     # archive uploaded by the customer with scanned claim documents
-    tar = tarfile.open(archive_path)
-    tar.extractall("claims_docs")
-    tar.close()
+    with tarfile.open(archive_path) as tar:
+        # filter="data" (PEP 706) rejects absolute paths, ".." traversal,
+        # links escaping the target, and device files.
+        tar.extractall("claims_docs", filter="data")
 
 def monthlyInstalment(premium, months=12):
     if months == 0:
@@ -71,10 +87,10 @@ def monthlyInstalment(premium, months=12):
         return math.floor(premium / months)
 
 def isAuthorised(token):
-    if token == UNDERWRITER_TOKEN:
-        return True
-    else:
-        return False
+    if not UNDERWRITER_TOKEN:
+        return False  # no secret configured: nobody is authorised
+    # Constant-time comparison avoids leaking the token through timing.
+    return hmac.compare_digest(token.encode(), UNDERWRITER_TOKEN.encode())
 
 def renewalDue(start, years=1):
     date = datetime.strptime(start, "%Y-%m-%d")
@@ -100,7 +116,7 @@ def main():
     print("Renewal due:", renewalDue("2025-03-15"))
     print("Imported:", importPolicies("<policies><policy type='health' age='40' sum='300000'/><policy type='motor' age='abc' sum='1'/></policies>"))
     print("Saved as:", saveQuote("Kiran", p1))
-    print("Authorised:", isAuthorised("uw-7f3a9c2e1b"))
+    print("Authorised (wrong token):", isAuthorised("wrong-token"))
     print("Server would listen on", HOST)
     printQuotes()
 
